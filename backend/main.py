@@ -61,9 +61,18 @@ def analyze_single(ticket: SingleTicket, db: Session = Depends(get_db)):
 
 
 # ── Run Enrichment in Background ────────────────────────────
+def _enrich_with_own_session(limit: int):
+    """Background task that creates its own DB session (request session closes too early)."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        enrich_tickets(db, limit=limit)
+    finally:
+        db.close()
+
 @app.post("/pipeline/enrich")
-def trigger_enrichment(background_tasks: BackgroundTasks, limit: int = 100, db: Session = Depends(get_db)):
-    background_tasks.add_task(enrich_tickets, db, limit=limit)
+def trigger_enrichment(background_tasks: BackgroundTasks, limit: int = 100):
+    background_tasks.add_task(_enrich_with_own_session, limit)
     return {"message": f"Enrichment started for up to {limit} tickets"}
 
 

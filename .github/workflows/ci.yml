@@ -57,13 +57,21 @@ jobs:
     steps:
       - name: Deploy backend to Render
         run: |
-          curl -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}" \
-            -H "Content-Type: application/json"
+          if [ -n "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}" ]; then
+            curl -f -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}" \
+              -H "Content-Type: application/json" && echo "Backend deploy triggered"
+          else
+            echo "RENDER_BACKEND_DEPLOY_HOOK not set — skipping"
+          fi
 
       - name: Deploy frontend to Render
         run: |
-          curl -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}" \
-            -H "Content-Type: application/json"
+          if [ -n "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}" ]; then
+            curl -f -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}" \
+              -H "Content-Type: application/json" && echo "Frontend deploy triggered"
+          else
+            echo "RENDER_FRONTEND_DEPLOY_HOOK not set — skipping"
+          fi
 
       - name: Deployment triggered
         run: echo "Deployed to Render — check https://dashboard.render.com"
