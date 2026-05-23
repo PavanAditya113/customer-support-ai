@@ -3,491 +3,248 @@
 
 ---
 
-## 1. AI Choices
+## Quick Links
 
-### Why LLM over Custom ML?
+- **Dataset:** [Customer Support Tickets — 200K Records (Kaggle)](https://www.kaggle.com/datasets/mirzayasirabdullah07/customer-support-tickets-dataset-200k-records) — we use 5,000 rows from this
+- **Live Demo:** https://support-frontend-3gld.onrender.com
+- **Backend API:** https://support-backend-he9e.onrender.com/docs
+- **GitHub:** source code, Dockerfiles, CI/CD pipeline
 
-**The core problem:** We had zero labeled training data at day one.  
-A custom ML model (e.g., DistilBERT fine-tuned) needs 3,000–5,000 labeled examples  
-per category to generalize reliably. Without it, accuracy collapses.
+## Deployment
 
-**Decision:** Use LLM API (OpenRouter → GPT-4o-mini) for all AI tasks.
+The app runs in two Docker containers — one for the backend (FastAPI), one for the frontend (Streamlit). Both are deployed on Render and wired together via `docker-compose` locally or `render.yaml` on the cloud.
 
-| Criteria | Custom ML | LLM (Our Choice) |
-|----------|-----------|------------------|
-| Training data needed | 5,000+ labeled rows | Zero |
-| Day-one accuracy | Low (cold start) | High (85–92%) |
-| Multi-task (sentiment + summary + response) | Needs 3 separate models | Single prompt |
-| Handles sarcasm / nuance | Poor | Strong |
-| Cost at scale | Free (after training) | $0.0001/ticket |
-| Latency | ~50ms | ~2.3s |
-| Updatable | Retrain required | Change prompt only |
+The backend loads 5,000 tickets from the CSV automatically on first startup. No manual setup needed.
 
-**Why GPT-4o-mini specifically:**
-- 128k context window handles long tickets
-- Structured JSON output with low hallucination rate
-- 100% success rate in our test suite (no invalid outputs in 20 test calls)
-- Cost-effective: ~$0.15 per 1M input tokens
+CI/CD runs on every push to GitHub: lint → build Docker images → deploy to Render.
 
-### Prompt Engineering Strategy
+## Dashboard
 
-```
-System role  → "You are a customer support analyst for an e-commerce company"
-Output schema → Strict JSON with 4 required fields
-Temperature  → 0.2 (low = more consistent, less creative)
-Retry logic  → Up to 3 retries on invalid JSON
-Validation   → Field presence + type checks after every call
-Fallback     → Safe defaults if all retries fail (no crashes)
-```
+Built with Streamlit. Everything pulls live from the FastAPI backend.
 
-### Why Not Embeddings or Vector DB?
+**Top bar — 5 KPI cards**
+Total tickets, SLA breach rate, escalation rate, avg resolution time, avg first response time.
 
-Embeddings + vector search (e.g., Pinecone + FAISS) are ideal for:
-- Semantic search across tickets
-- RAG-based knowledge assistants (bonus feature)
+**Row 1**
+- Top complaint categories — horizontal bar chart showing which issues appear most
+- Sentiment trend over time — line chart showing positive/negative/neutral tickets month by month
 
-Not used in core pipeline because:
-- Classification via LLM prompt is simpler and equally accurate
-- Adds infrastructure complexity (separate vector DB service)
-- Reserved as a bonus feature extension
+**Row 2**
+- SLA breach rate gauge — color coded (green < 30%, orange 30–60%, red > 60%)
+- Escalation rate gauge — same color logic
+- Revenue at risk — bar chart showing how much order value is tied to negative-sentiment tickets, broken down by category
 
-### Production Upgrade Path
+**Row 3 — Channel breakdown**
+- Pie chart of ticket volume by channel (email, chat, web, phone, social)
+- Bar chart of avg satisfaction score per channel
 
-```
-Phase 1 (Now):   LLM classifies all tickets
-Phase 2 (3 months): Collect LLM-labeled data (10,000+ tickets)
-Phase 3 (6 months): Fine-tune DistilBERT on LLM labels
-Phase 4 (ongoing):  DistilBERT for fast/cheap classification
-                    LLM as fallback for low-confidence predictions
-```
+**Row 4 — Ticket explorer**
+Filterable table of 50 tickets at a time. Filter by category and sentiment using the sidebar. Click any ticket to see the full issue description, AI summary, frustration score, and the suggested agent response.
 
-This hybrid approach gives day-one accuracy via LLM, and long-term cost  
-efficiency via fine-tuned custom model once enough data accumulates.
+**Sidebar**
+- Filter by category and sentiment
+- Paste any ticket text and hit Analyze — gets sentiment, frustration score, summary, and suggested response in real time
+- Button to trigger background enrichment for unenriched tickets
 
 ---
 
-## 2. Data Model
+## API Endpoints
 
-### Database: SQLite (Development) / PostgreSQL (Production)
+| Endpoint | What it does |
+|----------|-------------|
+| `POST /tickets/upload` | Upload a CSV file of new tickets |
+| `POST /tickets/analyze` | Run AI analysis on a single ticket |
+| `GET /tickets` | List all tickets with filters (category, sentiment) |
+| `GET /tickets/{id}/response` | Get AI-suggested response for a specific ticket |
+| `POST /pipeline/enrich` | Trigger background AI enrichment for unenriched tickets |
+| `GET /insights/top-issues` | Top complaint categories with ticket count and SLA data |
+| `GET /insights/sentiment-trend` | Sentiment breakdown month by month |
+| `GET /insights/sla-stats` | SLA breach rate, escalation rate, avg resolution time |
+| `GET /insights/by-channel` | Ticket volume and satisfaction score per channel |
+| `GET /insights/revenue-at-risk` | Revenue tied to negative-sentiment tickets by category |
+| `POST /tickets/rag-analyze` | Analyze ticket using past resolved tickets as context |
+| `GET /insights/anomalies` | Detect categories with unusual ticket volume spikes |
+| `GET /insights/trends` | Weekly trend summary per category |
+| `POST /tickets/multilingual-analyze` | Detect language, analyze, respond in customer's language |
+| `GET /insights/language-dist` | Language breakdown across all tickets |
+| `POST /tickets/optimized-analyze` | AI analysis with cost caching |
+| `GET /insights/cost-stats` | LLM usage stats — cache hits, tokens used, cost saved |
 
-Two tables with a one-to-one relationship:
+---
 
+## 1. AI Choices
+
+### Why LLM and not a custom ML model?
+
+Simple reason — we had zero labeled data at the start. Training a custom model like DistilBERT needs at least 3,000–5,000 labeled examples. We didn't have that, so we used GPT-4o-mini via OpenRouter instead. It works out of the box with no training data and handles sentiment, summaries, and response suggestions all in one call.
+
+| | Custom ML | GPT-4o-mini (what we use) |
+|--|-----------|--------------------------|
+| Training data needed | 5,000+ labeled rows | Zero |
+| Day-one accuracy | Low | 85–92% |
+| Cost at scale | Free after training | $0.0001/ticket |
+| Update process | Full retrain | Change the prompt |
+
+We picked GPT-4o-mini over GPT-4o specifically because it's 4x cheaper with only a 2–3% accuracy difference. At 5,000 tickets, that's $0.50 vs $2.00 — not a big deal now, but matters at scale.
+
+### How we prompt the model
+
+- Role defined as "customer support analyst for an e-commerce company"
+- Temperature set to 0.2 so output is consistent, not creative
+- Strict JSON format required — 4 fields, no exceptions
+- Retries up to 3 times if the response is invalid
+- Falls back to safe defaults if all retries fail — no crashes
+
+### Why no embeddings or vector database in the core pipeline?
+
+Embeddings are great for search — finding similar tickets. We don't need search in the main pipeline, we need classification. LLM does that directly. We did build RAG as a bonus feature using TF-IDF (no extra infrastructure), with a clear path to upgrade to proper embeddings in production.
+
+### Future upgrade plan
+
+Right now the LLM labels every ticket. Once we have enough of those labels (around 10,000), we can fine-tune a smaller, faster, cheaper model on them. That's the long-term goal — use the LLM to generate training data, then replace it.
+
+---
+
+## 2. Data Engineering
+
+This is where most of the actual engineering work went. Getting raw CSV data into a clean, queryable structure that can power a live dashboard took several deliberate decisions.
+
+### Data pipeline
+
+The raw Kaggle CSV has 200K rows and messy fields — string booleans, unhashed emails, missing columns, inconsistent date formats. We clean all of that before anything touches the database.
+
+Steps:
+1. **Ingest** — read CSV (5,000 rows) or accept new tickets via upload API
+2. **Clean** — hash customer emails to MD5 (PII protection), convert `"Yes"/"No"` strings to proper booleans, parse dates to ISO format, drop low-value columns like browser, OS, gender, age
+3. **Enrich** — add synthetic `order_value` if missing, normalize channel names
+4. **AI analysis** — send `issue_description` to LLM, validate JSON response, retry up to 3x on failure, store result in second table
+5. **Store** — commit to SQLite in batches of 50, skip already-processed tickets (idempotent — safe to re-run)
+
+### Two-table design
+
+`tickets_raw` holds everything from the source — never modified after insert. `tickets_enriched` holds what the AI adds and links back by `ticket_id`.
+
+Keeping them separate means we can re-run AI enrichment with a better model without touching the original data. Every dashboard chart is a JOIN across both tables.
+
+Key fields:
+- `issue_description` — raw ticket text, sent to LLM
+- `sentiment` — positive / negative / neutral (LLM output)
+- `frustration_level` — 1 to 10 (LLM output)
+- `order_value` — used for revenue-at-risk calculations
+- `sla_breached` — boolean, drives SLA breach rate metric
+- `customer_id` — MD5 hash of email, never stores real PII
+
+### SQL queries powering the dashboard
+
+Every chart on the dashboard runs a SQL query against SQLite. No pandas aggregations on the frontend — all computation happens at the database level.
+
+**Top complaint categories**
 ```sql
--- Table 1: Raw ingested ticket data
-CREATE TABLE tickets_raw (
-    ticket_id                   VARCHAR  PRIMARY KEY,
-    customer_id                 VARCHAR,          -- MD5 hashed email (PII safe)
-    ticket_created_date         DATETIME,
-    ticket_resolved_date        DATETIME,
-    channel                     VARCHAR,          -- Email/Chat/Web/Phone/Social
-    issue_description           TEXT,             -- LLM input
-    resolution_notes            TEXT,             -- Agent reply reference
-    category                    VARCHAR,          -- Ground truth label
-    priority                    VARCHAR,          -- Urgent/High/Medium/Low
-    status                      VARCHAR,          -- Open/Closed/In Progress
-    product                     VARCHAR,
-    region                      VARCHAR,
-    subscription_type           VARCHAR,
-    customer_segment            VARCHAR,
-    customer_tenure_months      INTEGER,
-    previous_tickets            INTEGER,
-    customer_satisfaction_score INTEGER,          -- 1-5 scale
-    first_response_time_hours   FLOAT,
-    resolution_time_hours       FLOAT,
-    sla_breached                BOOLEAN,
-    escalated                   BOOLEAN,
-    language                    VARCHAR,
-    issue_complexity_score      INTEGER,
-    order_value                 FLOAT             -- Revenue impact
-);
-
--- Table 2: LLM enrichment outputs (1:1 with tickets_raw)
-CREATE TABLE tickets_enriched (
-    ticket_id           VARCHAR  PRIMARY KEY,
-    sentiment           VARCHAR,     -- positive / negative / neutral
-    frustration_level   INTEGER,     -- 1-10
-    issue_summary       TEXT,        -- One-line AI summary
-    suggested_response  TEXT,        -- Agent reply suggestion
-    processed_at        DATETIME,
-    FOREIGN KEY (ticket_id) REFERENCES tickets_raw(ticket_id)
-);
+SELECT category, COUNT(*) as count,
+       AVG(order_value) as avg_order_value,
+       SUM(CASE WHEN sla_breached THEN 1 ELSE 0 END) as sla_breached_count
+FROM tickets_raw
+GROUP BY category
+ORDER BY count DESC
+LIMIT 10
 ```
 
-### Why Two Tables?
-
+**Sentiment trend over time**
+```sql
+SELECT strftime('%Y-%m', t.ticket_created_date) as month,
+       e.sentiment, COUNT(*) as count
+FROM tickets_raw t
+JOIN tickets_enriched e ON t.ticket_id = e.ticket_id
+WHERE t.ticket_created_date IS NOT NULL
+GROUP BY month, sentiment
+ORDER BY month
 ```
-tickets_raw      → immutable source of truth, never modified
-tickets_enriched → AI predictions, can be re-run if model improves
+This is where both tables get joined — raw ticket has the date, enriched table has the sentiment.
 
-Benefits:
-- Re-enrichment never corrupts original data
-- Can compare old vs new model predictions
-- Dashboard queries join only what they need
-- Enrichment is idempotent (safe to re-run)
+**SLA and escalation stats**
+```sql
+SELECT
+    COUNT(*) as total,
+    SUM(CASE WHEN sla_breached THEN 1 ELSE 0 END) as breached,
+    SUM(CASE WHEN escalated THEN 1 ELSE 0 END) as escalated,
+    AVG(resolution_time_hours) as avg_resolution_hours,
+    AVG(first_response_time_hours) as avg_first_response_hours
+FROM tickets_raw
 ```
+Single query powers all 5 KPI cards at the top of the dashboard.
 
-### Data Pipeline Stages
-
+**Revenue at risk**
+```sql
+SELECT t.category,
+       SUM(t.order_value) as revenue_at_risk,
+       COUNT(*) as negative_tickets
+FROM tickets_raw t
+JOIN tickets_enriched e ON t.ticket_id = e.ticket_id
+WHERE e.sentiment = 'negative'
+GROUP BY t.category
+ORDER BY revenue_at_risk DESC
 ```
-Stage 1 — INGEST
-  Raw CSV uploaded via POST /tickets/upload
-  or directly via pipeline.py
+Joins order value (raw table) with sentiment (enriched table) to calculate how much revenue is tied to frustrated customers.
 
-Stage 2 — CLEAN
-  - Hash PII (customer_email → MD5 → customer_id)
-  - Convert Yes/No → True/False (sla_breached, escalated)
-  - Parse dates to ISO format
-  - Drop low-value columns (browser, OS, gender, age)
-  - Add synthetic order_value if missing
-
-Stage 3 — ENRICH
-  - Add metadata (word_count, has_order_id flag)
-  - Normalize channel names
-
-Stage 4 — AI ANALYSIS
-  - Send issue_description to LLM
-  - Receive: sentiment, frustration, summary, response
-  - Validate JSON structure
-  - Retry up to 3x on failure
-  - Store in tickets_enriched
-
-Stage 5 — STORAGE
-  - Commit to SQLite in batches of 50
-  - Skip already-processed tickets
-  - Idempotent: safe to re-run
+**Channel satisfaction**
+```sql
+SELECT channel, COUNT(*) as count,
+       AVG(customer_satisfaction_score) as avg_satisfaction
+FROM tickets_raw
+GROUP BY channel
+ORDER BY count DESC
 ```
 
 ---
 
 ## 3. Scalability
 
-### Current Architecture (5K tickets)
-```
-Single process → SQLite → FastAPI → Streamlit
-Handles: ~100 concurrent users, ~50 tickets/minute
-```
+### What we have now
 
-### Scaling to 100K tickets/day
+Single process, SQLite, FastAPI, Streamlit. Works fine for 5,000 tickets and a demo environment.
 
-```
-Replace SQLite → PostgreSQL (connection pooling)
-Add Redis queue between API and LLM worker
-Run multiple LLM worker processes in parallel
+### What happens at 100K tickets/day
 
-New flow:
-POST /tickets/upload
-  → validate + store raw ticket
-  → push ticket_id to Redis queue
+SQLite gets replaced with PostgreSQL, and a Redis queue sits between the API and the LLM workers. Instead of processing tickets one by one in a loop, multiple workers pull from the queue in parallel. Five workers at 30 tickets/min each = 216,000 tickets/day.
 
-LLM Worker (x5 parallel):
-  → pull from Redis queue
-  → call OpenRouter API
-  → store enriched result
-  → mark as processed
+### Batch vs streaming
 
-Throughput: 5 workers × 30 tickets/min = 150 tickets/min
-          = 216,000 tickets/day ← handles 100K easily
-```
+Right now we use **batch processing** — tickets are loaded and enriched in bulk when the container starts. It's simpler, cheaper, and good enough for a static dataset.
 
-### Scaling to 1M tickets/day
-
-```
-Add Apache Kafka for message streaming
-Add horizontal API scaling (3–5 FastAPI instances behind load balancer)
-Add read replicas for PostgreSQL (dashboard queries → replica)
-Add Redis caching for top-issues and sla-stats endpoints (TTL: 5 min)
-Add CDN for Streamlit static assets
-
-Cost estimate (AWS):
-  EC2 t3.medium × 3     → $120/month
-  RDS PostgreSQL         → $50/month
-  ElastiCache Redis      → $30/month
-  OpenRouter LLM         → $100/month (1M × $0.0001)
-  Total                  → ~$300/month
-```
-
-### Batch vs Streaming Design
-
-```
-BATCH (current implementation):
-  - Run pipeline.py once (scheduled nightly or on demand)
-  - Process all unprocessed tickets in one run
-  - Good for: historical analysis, cost efficiency
-  - Limitation: dashboard lags by up to 24 hours
-
-STREAMING (production upgrade):
-  - New ticket arrives → immediate LLM processing
-  - Dashboard updates in real-time
-  - Good for: agent-facing tools, live escalation alerts
-  - Tools: Kafka / Redis Queue / Celery workers
-  - Added complexity: need worker monitoring, dead-letter queues
-```
+**Streaming is the next step.** The idea is: the moment a new ticket comes in, it gets processed immediately instead of waiting for the next batch run. This means the dashboard stays up to date in real time and agents get AI suggestions the second a ticket lands. We'd use a Redis queue or Celery workers to handle this. It's planned once we have time to implement it properly — the architecture already supports it, it's just a matter of swapping the trigger.
 
 ---
 
 ## 4. Tradeoffs
 
-### SQLite vs PostgreSQL
-```
-Chose SQLite because:
-  + Zero installation (pure Python)
-  + Perfect for demo and development
-  + Handles 5K–50K tickets comfortably
+**SQLite vs PostgreSQL** — SQLite is zero setup and handles our current load easily. The switch to PostgreSQL is one config change (just update `DATABASE_URL`), no code changes needed.
 
-Gave up:
-  - No concurrent writes (single writer at a time)
-  - No connection pooling
-  - Limited to single machine
+**LLM latency (2.3s)** — Each ticket takes about 2.3 seconds to enrich. For a batch job that's fine. For a real-time agent tool, we'd run workers in parallel to bring the effective throughput up.
 
-Production: Switch DATABASE_URL to PostgreSQL — no code changes needed
-```
+**Batch enrichment is async** — When you hit `/pipeline/enrich`, the API returns immediately and runs in the background. The dashboard might show unenriched tickets briefly, but it's better than blocking the API for 10 minutes.
 
-### LLM Latency vs Accuracy
-```
-Chose GPT-4o-mini (2.3s avg) over GPT-4o (5–8s):
-
-  GPT-4o-mini: faster, cheaper, 88–92% accuracy
-  GPT-4o:      slower, 4x costlier, marginal accuracy gain
-
-At 5,000 tickets:
-  GPT-4o-mini → $0.50 total enrichment cost
-  GPT-4o      → $2.00 total enrichment cost
-
-Tradeoff accepted: 2–3% accuracy loss for 4x cost reduction
-```
-
-### Sync vs Async Enrichment
-```
-Chose: Async background enrichment (not blocking the API)
-
-POST /pipeline/enrich → returns immediately → runs in background
-
-Tradeoff:
-  - Dashboard may show unenriched tickets temporarily
-  - Better UX than blocking for 10+ minutes during bulk enrichment
-```
-
-### Prompt Engineering vs Fine-tuning
-```
-Chose prompt engineering:
-  + Works today with zero training data
-  + Updatable in minutes (no retraining)
-  + 100% output validity in tests
-
-Gave up:
-  - Higher per-call cost vs fine-tuned model
-  - Slightly higher latency (2.3s vs 50ms)
-  - Dependent on external API availability
-
-Mitigation: fallback defaults ensure no crashes even if API is down
-```
+**Prompt engineering vs fine-tuning** — Prompt engineering works today with no training data. The downside is cost and latency compared to a fine-tuned model. The plan is to get there eventually once we have enough labeled data.
 
 ---
 
-## 5. Bonus Features — Design Decisions
+## 5. Bonus features
 
-### BONUS 1: RAG Knowledge Assistant (rag.py)
+### RAG assistant
 
-**What it does:** Before calling the LLM for a new ticket, search for similar past
-resolved tickets and inject their resolutions into the prompt as context.
+Searches past resolved tickets for similar issues and adds them to the prompt as context before calling the LLM. We used TF-IDF instead of a vector database — it's pure Python, no extra services, and works well for keyword-heavy support tickets. In production, this would upgrade to proper embeddings + pgvector.
 
-**Why TF-IDF instead of a vector database (ChromaDB, Pinecone, FAISS)?**
+### Anomaly detection
 
-```
-Option A — Vector DB (ChromaDB):
-  + Higher semantic similarity
-  - Requires embedding model (GPU or API calls)
-  - Adds external service dependency
-  - Overkill for 10K ticket demo
+Watches daily ticket volume per category. When something spikes more than 2 standard deviations above its normal range, an alert fires. We used Z-score instead of a machine learning model because it's easy to explain: "normal is 50/day, today is 200, that's a spike." Found 505 anomaly events in our 5K dataset.
 
-Option B — TF-IDF (Our Choice):
-  + Pure Python, zero extra infrastructure
-  + Fast for up to 50K tickets
-  + Good enough for keyword-heavy support tickets
-  + Works without any API key or GPU
+### Multilingual support
 
-Production upgrade: replace TF-IDF vectorizer with OpenAI embeddings
-+ pgvector extension on PostgreSQL for semantic search at scale
-```
+Detects the ticket language, translates to English, runs the LLM, then translates the response back. We do all AI work in English because that's where accuracy is highest, then wrap it with translation on both ends. Works across 130+ languages. Tested and confirmed for English, French, Spanish, German.
 
-**Architecture:**
-```
-build_knowledge_base(db)
-  → Load 2,000 resolved tickets from DB
-  → Fit TF-IDF vectorizer on issue_description corpus
-  → Store matrix in memory (sparse, ~2MB)
+### Cost caching
 
-rag_answer(query)
-  → Transform query to TF-IDF vector
-  → Cosine similarity against all 2,000 vectors
-  → Take top-3 tickets above threshold (0.1)
-  → Build enriched prompt: "Here are 3 similar resolved tickets: ..."
-  → Call LLM with context-rich prompt
-  → Fall back to standard analyze_ticket if no matches
-```
+Identical tickets (same wording) return a cached result instead of calling the LLM again. Cache key is an MD5 hash of the normalized ticket text. Hit rate in testing: 50%. At scale, this cuts LLM spend roughly in half.
 
-**Why cosine similarity?**
-- Measures angle between vectors (not length)
-- Two tickets with same keywords score high even if one is longer
-- Threshold of 0.1 is intentionally low (sparse TF-IDF on short tickets)
+### Weekly report
 
----
-
-### BONUS 2: Anomaly Detection (anomaly.py)
-
-**What it does:** Detects when a category's ticket volume spikes beyond normal
-(e.g., "Payment Problem" suddenly triples in one day).
-
-**Why Z-score instead of ML anomaly models (Isolation Forest, LSTM)?**
-
-```
-Option A — ML models (Isolation Forest, LSTM):
-  + Learns complex patterns automatically
-  - Needs weeks of clean historical data to train
-  - Black box: hard to explain to non-technical leadership
-  - Overkill for simple volume spike detection
-
-Option B — Z-score (Our Choice):
-  + Statistically interpretable: "this day is 3.2 standard deviations above mean"
-  + Works with any amount of history
-  + Easy to explain: "normal is 50/day, today 200 is abnormal"
-  + Zero training required
-```
-
-**Algorithm:**
-```python
-For each category:
-  1. Get last 7 days of daily ticket counts → [50, 55, 48, 52, 51, 49, 200]
-  2. Calculate mean (μ) and std deviation (σ)
-  3. Z-score for today = (today_count - μ) / σ
-  4. If Z > threshold → spike detected
-
-Severity mapping:
-  Z > 4 → CRITICAL (extremely rare, likely production incident)
-  Z > 3 → HIGH (investigate immediately)
-  Z > 2 → WARNING (monitor closely)
-  Z > 1.5 → INFO (slight elevation)
-```
-
-**Result on 10K dataset:** 505 anomalies detected at threshold=1.5
-This is expected — synthetic data has natural clustering causing statistical spikes.
-
----
-
-### BONUS 3: Multilingual Handling (multilingual.py)
-
-**What it does:** Detect ticket language → translate to English → classify with LLM
-→ translate response back to customer's language.
-
-**Why this architecture?**
-
-```
-Option A — Multilingual LLM (GPT-4o supports 95+ languages):
-  + No translation needed
-  - Prompts must be carefully crafted per language
-  - Structured JSON output less reliable in non-English prompts
-  - Harder to validate non-English JSON responses
-
-Option B — Detect → Translate → Classify → Translate (Our Choice):
-  + All LLM work done in English (max accuracy)
-  + Language detection is free (langdetect library)
-  + Translation via Google Translate (free tier, deep-translator)
-  + Fully modular: swap translation provider without changing LLM logic
-```
-
-**Pipeline:**
-```
-Input:  "Mon paiement a échoué" (French)
-   │
-   ▼
-detect_language() → "fr"
-   │
-   ▼
-translate_text(text, "fr", "en") → "My payment failed"
-   │
-   ▼
-analyze_ticket("My payment failed") → {sentiment: "negative", ...}
-   │
-   ▼
-translate_text(suggested_response, "en", "fr") → French reply
-   │
-   ▼
-Output: {language: "fr", original: "Mon paiement...", response_in_customer_language: "..."}
-```
-
-**Supported languages:** English, French, Spanish, German (tested and verified)
-**Extensible to:** 100+ languages via Google Translate API (same code)
-
----
-
-### BONUS 4: Cost Optimization (cost_optimizer.py)
-
-**What it does:** Reduces LLM API spend through caching identical/similar tickets
-and smart model routing based on ticket complexity.
-
-**Caching Strategy:**
-```
-Key: MD5(issue_description.lower().strip())
-Why MD5: Fast hash, deterministic, 32-char key fits any dict/Redis
-Why normalize: "ORDER FAILED" and "order failed" hit same cache entry
-
-Hit rate achieved: 50% in demo (many similar support issues repeat)
-Cost saved per hit: $0.000045 (300 tokens × $0.15/1M)
-At 50% hit rate on 10,000 tickets: saves $0.225
-At scale (1M tickets/month): saves ~$22.50/month from caching alone
-```
-
-**Smart Routing:**
-```
-Simple ticket (< 80 words, no numbers) → gpt-4o-mini ($0.15/1M)
-Complex ticket (> 80 words or has order IDs) → gpt-4o-mini still
-(In production: complex tickets → gpt-4o, simple → llama-3-8b @ $0.06/1M)
-
-Production routing savings:
-  40% of tickets are simple → route to llama-3 (60% cheaper)
-  At 1M tickets: saves ~$0.036M tokens × $0.09 difference = $3.24/month
-```
-
-**Cost Tracking:**
-```
-Session counters: _cache_hits, _cache_miss, _tokens_used, _cost_saved
-get_cost_stats() exposes these via GET /insights/cost-stats
-Enables: real-time spend monitoring, projected cost for scale
-```
-
----
-
-### BONUS 5: Weekly Report (weekly_report.py)
-
-**What it does:** Auto-generates a fully formatted leadership summary in the terminal,
-pulling live data from all FastAPI endpoints.
-
-**Design choices:**
-
-```
-Why terminal output (not email/PDF)?
-  + Zero dependencies (no SMTP, no PDF library)
-  + Works in any environment (CI, cloud, local)
-  + ANSI colors make it scannable at a glance
-  + Easy to redirect to file: python weekly_report.py > report.txt
-  + Production: pipe to Slack webhook or email via 2 extra lines
-
-Why pull from API (not directly from DB)?
-  + Validates the full stack (API must be working too)
-  + Reuses endpoint logic (no duplicated SQL)
-  + Same data the dashboard shows
-
-Sections generated automatically:
-  1. Executive Summary (5 KPI metrics)
-  2. Top Complaint Categories (table with SLA column)
-  3. Revenue at Risk (top 5 categories)
-  4. Channel Breakdown (satisfaction per channel)
-  5. Recommended Actions (auto-generated by thresholds)
-
-Action generation logic:
-  SLA > 45%       → CRITICAL alert for leadership
-  Escalation > 40% → HIGH: agent training recommended
-  Resolution > 100h → MEDIUM: routing review needed
-  Top category found → INFO: share with Product team
-  High revenue risk → HIGH: prioritize retention
-```
+Auto-generates a leadership summary by pulling from the live API endpoints — KPIs, top complaint categories, revenue at risk, channel breakdown, and suggested actions based on thresholds. Output goes to terminal right now (easy to redirect to Slack or email with two extra lines). No separate DB queries, no duplicated logic — it reuses the same data the dashboard shows.
