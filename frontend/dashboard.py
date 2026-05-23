@@ -41,20 +41,27 @@ with st.sidebar:
                 res = requests.post(f"{API}/tickets/analyze",
                     json={"issue_description": new_ticket})
                 if res.ok:
-                    data = res.json()
-                    st.success(f"✅ Saved as ticket `{data.get('ticket_id', '')}`")
-                    col_a, col_b, col_c = st.columns(3)
-                    col_a.metric("Sentiment", data.get('sentiment', '—'))
-                    col_b.metric("Frustration", f"{data.get('frustration_level', '—')}/10")
-                    col_c.metric("Order Value", f"${data.get('order_value', 0):.2f}")
-                    if data.get('category'):
-                        st.write(f"**Category:** {data['category']}")
-                    if data.get('priority'):
-                        st.write(f"**Priority:** {data['priority']}")
-                    st.write(f"**Summary:** {data.get('issue_summary', '—')}")
-                    st.write("**Suggested Response:**")
-                    st.info(data.get('suggested_response', '—'))
+                    st.session_state["last_analysis"] = res.json()
                     st.rerun()
+
+    # Show last analysis result (persists after rerun)
+    if "last_analysis" in st.session_state:
+        data = st.session_state["last_analysis"]
+        st.success(f"✅ Saved as `{data.get('ticket_id', '')}`")
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Sentiment", data.get('sentiment', '—'))
+        col_b.metric("Frustration", f"{data.get('frustration_level', '—')}/10")
+        col_c.metric("Order Value", f"${data.get('order_value', 0):.2f}")
+        if data.get('category'):
+            st.write(f"**Category:** {data['category']}")
+        if data.get('priority'):
+            st.write(f"**Priority:** {data['priority']}")
+        st.write(f"**Summary:** {data.get('issue_summary', '—')}")
+        st.write("**Suggested Response:**")
+        st.info(data.get('suggested_response', '—'))
+        if st.button("Clear"):
+            del st.session_state["last_analysis"]
+            st.rerun()
 
     st.divider()
     if st.button("🔄 Run Enrichment (100 tickets)"):
