@@ -18,6 +18,8 @@ Return exactly this JSON structure:
 {{
   "sentiment": "positive" or "negative" or "neutral",
   "frustration_level": integer from 1 to 10,
+  "category": one of "Payment Problem" or "Bug Report" or "Login Issue" or "Refund Request" or "Feature Request" or "Account Suspension" or "Data Sync Issue" or "Performance Issue" or "Security Concern" or "Subscription Cancellation",
+  "priority": one of "Low" or "Medium" or "High" or "Critical",
   "issue_summary": "one sentence describing the core problem",
   "suggested_response": "a professional agent reply under 60 words"
 }}"""
@@ -56,6 +58,19 @@ def analyze_ticket(issue_description: str, retries: int = 3) -> dict:
             assert result.get("issue_summary")
             assert result.get("suggested_response")
 
+            # Normalize category — fallback if LLM returns something unexpected
+            valid_categories = [
+                "Payment Problem", "Bug Report", "Login Issue", "Refund Request",
+                "Feature Request", "Account Suspension", "Data Sync Issue",
+                "Performance Issue", "Security Concern", "Subscription Cancellation"
+            ]
+            if result.get("category") not in valid_categories:
+                result["category"] = "General Inquiry"
+
+            # Normalize priority
+            if result.get("priority") not in ["Low", "Medium", "High", "Critical"]:
+                result["priority"] = "Medium"
+
             return result
 
         except Exception as e:
@@ -64,6 +79,8 @@ def analyze_ticket(issue_description: str, retries: int = 3) -> dict:
                 return {
                     "sentiment": "neutral",
                     "frustration_level": 5,
+                    "category": "General Inquiry",
+                    "priority": "Medium",
                     "issue_summary": issue_description[:100],
                     "suggested_response": "Thank you for reaching out. Our team is reviewing your issue and will respond shortly."
                 }

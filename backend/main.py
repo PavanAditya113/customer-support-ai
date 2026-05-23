@@ -47,14 +47,67 @@ async def upload_tickets(file: UploadFile = File(...), db: Session = Depends(get
     return {"message": f"Uploaded {loaded} new tickets", "total_rows": len(df)}
 
 
-# ── Analyze Single Ticket ───────────────────────────────────
+# ── Analyze Single Ticket + Save to DB ─────────────────────
 @app.post("/tickets/analyze")
 def analyze_single(ticket: SingleTicket, db: Session = Depends(get_db)):
+    import uuid
+    from datetime import datetime
+
     result = analyze_ticket(ticket.issue_description)
+
+    # Get average order value from existing tickets for realistic revenue tracking
+    avg_order = db.execute(text("SELECT AVG(order_value) FROM tickets_raw WHERE order_value > 0")).scalar()
+    order_value = round(float(avg_order), 2) if avg_order else 150.0
+
+    # Save to tickets_raw
+    ticket_id = f"LIVE-{uuid.uuid4().hex[:8].upper()}"
+    new_ticket = TicketRaw(
+        ticket_id               = ticket_id,
+        customer_id             = "live-user",
+        ticket_created_date     = datetime.utcnow(),
+        channel                 = ticket.channel,
+        issue_description       = ticket.issue_description,
+        category                = result.get("category", "General Inquiry"),
+        priority                = result.get("priority", "Medium"),
+        status                  = "Open",
+        product                 = ticket.product,
+        order_value             = order_value,
+        sla_breached            = False,
+        escalated               = False,
+        resolution_time_hours   = 0.0,
+        first_response_time_hours = 0.0,
+        customer_satisfaction_score = 0,
+        customer_tenure_months  = 0,
+        previous_tickets        = 0,
+        issue_complexity_score  = 0,
+        language                = "English",
+        region                  = "",
+        subscription_type       = "",
+        customer_segment        = "",
+        resolution_notes        = "",
+    )
+    db.add(new_ticket)
+
+    # Save to tickets_enriched
+    enriched = TicketEnriched(
+        ticket_id          = ticket_id,
+        sentiment          = result.get("sentiment", "neutral"),
+        frustration_level  = result.get("frustration_level", 5),
+        issue_summary      = result.get("issue_summary", ""),
+        suggested_response = result.get("suggested_response", ""),
+        processed_at       = datetime.utcnow(),
+    )
+    db.add(enriched)
+    db.commit()
+
     return {
-        "issue_description": ticket.issue_description,
+        "ticket_id":          ticket_id,
+        "issue_description":  ticket.issue_description,
         "sentiment":          result.get("sentiment"),
         "frustration_level":  result.get("frustration_level"),
+        "category":           result.get("category"),
+        "priority":           result.get("priority"),
+        "order_value":        order_value,
         "issue_summary":      result.get("issue_summary"),
         "suggested_response": result.get("suggested_response"),
     }

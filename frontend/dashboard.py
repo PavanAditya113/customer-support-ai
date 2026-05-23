@@ -42,12 +42,19 @@ with st.sidebar:
                     json={"issue_description": new_ticket})
                 if res.ok:
                     data = res.json()
-                    st.success("Done!")
-                    st.write(f"**Sentiment:** {data['sentiment']}")
-                    st.write(f"**Frustration:** {data['frustration_level']}/10")
-                    st.write(f"**Summary:** {data['issue_summary']}")
-                    st.write(f"**Suggested Response:**")
-                    st.info(data['suggested_response'])
+                    st.success(f"✅ Saved as ticket `{data.get('ticket_id', '')}`")
+                    col_a, col_b, col_c = st.columns(3)
+                    col_a.metric("Sentiment", data.get('sentiment', '—'))
+                    col_b.metric("Frustration", f"{data.get('frustration_level', '—')}/10")
+                    col_c.metric("Order Value", f"${data.get('order_value', 0):.2f}")
+                    if data.get('category'):
+                        st.write(f"**Category:** {data['category']}")
+                    if data.get('priority'):
+                        st.write(f"**Priority:** {data['priority']}")
+                    st.write(f"**Summary:** {data.get('issue_summary', '—')}")
+                    st.write("**Suggested Response:**")
+                    st.info(data.get('suggested_response', '—'))
+                    st.rerun()
 
     st.divider()
     if st.button("🔄 Run Enrichment (100 tickets)"):
