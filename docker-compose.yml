@@ -1,0 +1,27 @@
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: sqlite:///./support.db
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    volumes:
+      - backend_data:/app/backend
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://backend:8001
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:

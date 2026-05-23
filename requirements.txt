@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+pandas
+numpy
+python-dotenv
+httpx
+pydantic
+streamlit
+plotly
+requests
+python-multipart
+scikit-learn
+langdetect
+deep-translator

@@ -1,0 +1,23 @@
+services:
+
+  # ── Backend: FastAPI ─────────────────────────────────────────
+  - type: web
+    name: support-backend
+    env: docker
+    dockerfilePath: ./Dockerfile.backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./support.db
+      - key: OPENROUTER_API_KEY
+        sync: false          # Set this manually in Render dashboard
+
+  # ── Frontend: Streamlit ──────────────────────────────────────
+  - type: web
+    name: support-frontend
+    env: docker
+    dockerfilePath: ./Dockerfile.frontend
+    plan: free
+    envVars:
+      - key: API_URL
+        value: https://support-backend.onrender.com   # Update after first deploy
