@@ -129,6 +129,17 @@ def trigger_enrichment(background_tasks: BackgroundTasks, limit: int = 100):
     return {"message": f"Enrichment started for up to {limit} tickets"}
 
 
+@app.post("/pipeline/reset-enrichment")
+def reset_enrichment(db: Session = Depends(get_db)):
+    """Delete all enriched records (except LIVE tickets) so enrichment can re-run with fixed LLM."""
+    deleted = db.execute(text("""
+        DELETE FROM tickets_enriched
+        WHERE ticket_id NOT LIKE 'LIVE-%'
+    """))
+    db.commit()
+    return {"message": f"Cleared enriched data. Ready to re-enrich."}
+
+
 # ── Top Issues ──────────────────────────────────────────────
 @app.get("/insights/top-issues")
 def top_issues(db: Session = Depends(get_db)):
