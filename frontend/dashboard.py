@@ -19,10 +19,15 @@ st.caption("AI-powered analytics for e-commerce support operations")
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
     st.header("🔍 Filters")
-    category_filter = st.selectbox("Category", ["All", "Payment Problem", "Bug Report",
-        "Login Issue", "Refund Request", "Feature Request",
-        "Account Suspension", "Data Sync Issue",
-        "Performance Issue", "Security Concern", "Subscription Cancellation"])
+    try:
+        cats = requests.get(f"{API}/tickets/categories", timeout=5).json()
+        category_options = ["All"] + cats
+    except Exception:
+        category_options = ["All", "Payment Problem", "Bug Report", "Login Issue",
+                            "Refund Request", "Feature Request", "Account Suspension",
+                            "Data Sync Issue", "Performance Issue", "Security Concern",
+                            "Subscription Cancellation"]
+    category_filter = st.selectbox("Category", category_options)
     sentiment_filter = st.selectbox("Sentiment", ["All", "positive", "negative", "neutral"])
     st.divider()
     st.header("⚙️ Actions")
@@ -190,12 +195,12 @@ tickets = tickets_resp.json() if tickets_resp.ok else []
 
 if tickets:
     df_tickets = pd.DataFrame(tickets)
-    st.dataframe(
-        df_tickets[["ticket_id", "category", "priority", "channel",
+    # Only show columns that exist (graceful if enrichment not yet run)
+    display_cols = [c for c in ["ticket_id", "category", "priority", "channel",
                     "status", "sentiment", "frustration_level",
-                    "sla_breached", "escalated", "order_value", "issue_summary"]],
-        use_container_width=True, height=300
-    )
+                    "sla_breached", "escalated", "order_value", "issue_summary"]
+                    if c in df_tickets.columns]
+    st.dataframe(df_tickets[display_cols], use_container_width=True, height=300)
 
     # Detail view
     selected_id = st.selectbox("Select Ticket ID for full detail:",
@@ -208,13 +213,16 @@ if tickets:
                 st.markdown("**📝 Issue Description**")
                 st.info(sel.get("issue_description", "N/A"))
                 st.markdown("**🤖 AI Summary**")
-                st.write(sel.get("issue_summary", "Not enriched yet"))
+                st.write(sel.get("issue_summary") or "Not enriched yet — click 'Run Enrichment' in the sidebar")
             with c2:
                 st.markdown("**💬 Suggested Agent Response**")
                 st.success(sel.get("suggested_response") or "Run enrichment to generate response")
                 cols = st.columns(3)
-                cols[0].metric("Sentiment",        sel.get("sentiment", "—"))
-                cols[1].metric("Frustration",      f"{sel.get('frustration_level', '—')}/10")
+                cols[0].metric("Sentiment",        sel.get("sentiment") or "—")
+                cols[1].metric("Frustration",      f"{sel.get('frustration_level') or '—'}/10")
                 cols[2].metric("Order Value",      f"${sel.get('order_value', 0):.2f}")
+elif sentiment_filter != "All":
+    st.warning(f"No enriched tickets found with **{sentiment_filter}** sentiment. "
+               "Click '🔄 Run Enrichment' in the sidebar to analyze tickets first.")
 else:
     st.info("No tickets found. Upload a CSV or run the pipeline first.")

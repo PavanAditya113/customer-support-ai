@@ -19,7 +19,7 @@ db.close()
 print(f'Tickets in database: {count}')
 
 if count == 0:
-    print('Database empty — loading 10K tickets from CSV...')
+    print('Database empty — loading tickets from CSV...')
     from pipeline import run_full_pipeline
     run_full_pipeline('/app/data/tickets_clean.csv', enrich=False)
     print('Tickets loaded successfully.')

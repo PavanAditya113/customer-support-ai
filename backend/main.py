@@ -142,21 +142,41 @@ def get_ticket_response(ticket_id: str, db: Session = Depends(get_db)):
     }
 
 
+# ── Ticket Categories ───────────────────────────────────────
+@app.get("/tickets/categories")
+def list_categories(db: Session = Depends(get_db)):
+    rows = db.execute(text("""
+        SELECT DISTINCT category FROM tickets_raw
+        WHERE category IS NOT NULL
+        ORDER BY category
+    """)).fetchall()
+    return [r[0] for r in rows]
+
+
 # ── All Tickets (paginated) ─────────────────────────────────
 @app.get("/tickets")
 def list_tickets(skip: int = 0, limit: int = 50,
                  category: str = None, sentiment: str = None,
                  db: Session = Depends(get_db)):
-    rows = db.execute(text("""
+    # When sentiment filter is active, use INNER JOIN (only enriched tickets).
+    # When no sentiment filter, use LEFT JOIN to show all tickets including unenriched.
+    if sentiment:
+        join_clause = "JOIN tickets_enriched e ON t.ticket_id = e.ticket_id"
+        sentiment_clause = "AND e.sentiment = :sentiment"
+    else:
+        join_clause = "LEFT JOIN tickets_enriched e ON t.ticket_id = e.ticket_id"
+        sentiment_clause = ""
+
+    rows = db.execute(text(f"""
         SELECT t.ticket_id, t.category, t.priority, t.channel,
                t.status, t.order_value, t.ticket_created_date,
                t.sla_breached, t.escalated,
                e.sentiment, e.frustration_level, e.issue_summary, e.suggested_response,
                t.issue_description
         FROM tickets_raw t
-        LEFT JOIN tickets_enriched e ON t.ticket_id = e.ticket_id
+        {join_clause}
         WHERE (:category IS NULL OR t.category = :category)
-          AND (:sentiment IS NULL OR e.sentiment = :sentiment)
+          {sentiment_clause}
         ORDER BY t.ticket_created_date DESC
         LIMIT :limit OFFSET :skip
     """), {"category": category, "sentiment": sentiment,
